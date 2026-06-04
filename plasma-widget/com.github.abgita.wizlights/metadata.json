@@ -2,7 +2,7 @@
   "KPlugin": {
     "Id": "com.github.abgita.wizlights",
     "Name": "Wiz Lights",
-    "Description": "Control local Philips Wiz lights through the wizctl wrapper",
+    "Description": "Control local Philips WiZ lights with wizctl",
     "Icon": "brightness-high",
     "Version": "0.1.0",
     "Authors": [

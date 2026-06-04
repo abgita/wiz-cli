@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+"""Small command wrapper for controlling local Wiz lights.
+
+Examples:
+  ./wizctl list --json
+  ./wizctl on living
+  ./wizctl off bedroom
+  ./wizctl dim desktop 65
+  ./wizctl hsv living 210 70 80
+  ./wizctl temp living 2700 100
+  ./wizctl scene living 6 80
+  ./wizctl preset living meeting
+  ./wizctl presets --json
+  ./wizctl save-preset living cozy
+  ./wizctl status living
+  ./wizctl status --all
+  ./wizctl discover
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent
+PYTHON = Path(sys.executable)
+HELPER = ROOT / "wiz_udp.py"
+DISCOVER = ROOT / "discover_wiz_lights.py"
+DEFAULT_PRESETS_FILE = ROOT / "presets.json"
+APP_HOME = Path.home() / ".wiz-cli"
+CONFIG_FILE = APP_HOME / "config.json"
+PRESETS_FILE = APP_HOME / "presets.json"
+LIGHT_ICONS = ["default", "icon_08", "icon_11", "icon_16", "icon_19"]
+
+
+def load_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return default
+
+
+def save_json(data: Any) -> None:
+    print(json.dumps(data, indent=2))
+
+
+def write_json_file(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def config() -> dict[str, Any]:
+    data = load_json(CONFIG_FILE, {})
+    if not isinstance(data, dict):
+        raise SystemExit(f"Invalid config file: {CONFIG_FILE}")
+    return data
+
+
+def light_entries() -> dict[str, dict[str, str]]:
+    data = config().get("lights", {})
+    if not isinstance(data, dict):
+        raise SystemExit(f"Invalid lights section in: {CONFIG_FILE}")
+    entries: dict[str, dict[str, str]] = {}
+    for name, value in data.items():
+        if not isinstance(value, dict) or not value.get("ip"):
+            raise SystemExit(f"Invalid light entry for '{name}' in: {CONFIG_FILE}")
+        entry = {
+            "ip": str(value["ip"]),
+            "mac": str(value.get("mac", "")),
+        }
+        icon = str(value.get("icon", "default"))
+        if icon in LIGHT_ICONS:
+            entry["icon"] = icon
+        entries[str(name)] = entry
+    return entries
+
+
+def lights() -> dict[str, str]:
+    return {name: entry["ip"] for name, entry in light_entries().items()}
+
+
+def default_presets() -> dict[str, dict[str, Any]]:
+    data = load_json(DEFAULT_PRESETS_FILE, {})
+    if not isinstance(data, dict):
+        raise SystemExit(f"Invalid default presets file: {DEFAULT_PRESETS_FILE}")
+    return data
+
+
+def user_presets() -> dict[str, dict[str, Any]]:
+    data = load_json(PRESETS_FILE, {})
+    if not isinstance(data, dict):
+        raise SystemExit(f"Invalid presets file: {PRESETS_FILE}")
+    return data
+
+
+def presets() -> dict[str, dict[str, Any]]:
+    return {**default_presets(), **user_presets()}
+
+
+def light_ip(name: str) -> str:
+    mapping = lights()
+    try:
+        return mapping[name]
+    except KeyError:
+        known = ", ".join(sorted(mapping)) or "none"
+        raise SystemExit(f"Unknown light '{name}'. Known lights: {known}")
+
+
+def run_helper(ip: str, mode: str, *extra: str) -> subprocess.CompletedProcess[str]:
+    cmd = [str(PYTHON), str(HELPER), "--ip", ip, "--mode", mode, *extra]
+    return subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, check=True)
+
+
+def hsv_to_rgb(h: float, s: float, v: float) -> dict[str, int]:
+    h = h % 360
+    s = max(0, min(100, s)) / 100
+    v = max(0, min(100, v)) / 100
+    c = v * s
+    x = c * (1 - abs(((h / 60) % 2) - 1))
+    m = v - c
+    if h < 60:
+        r1, g1, b1 = c, x, 0
+    elif h < 120:
+        r1, g1, b1 = x, c, 0
+    elif h < 180:
+        r1, g1, b1 = 0, c, x
+    elif h < 240:
+        r1, g1, b1 = 0, x, c
+    elif h < 300:
+        r1, g1, b1 = x, 0, c
+    else:
+        r1, g1, b1 = c, 0, x
+    return {
+        "r": round((r1 + m) * 255),
+        "g": round((g1 + m) * 255),
+        "b": round((b1 + m) * 255),
+    }
+
+
+def perceptual_clamp_hsv(h: float, s: float, v: float) -> dict[str, float]:
+    """Ad-hoc HSV clamp for more realistic bulb colors."""
+    h = h % 360
+    v_clamped = max(v, 18)
+
+    s_max = 100
+    if v_clamped > 75:
+        s_max = 90
+    if v_clamped > 85:
+        s_max = 80
+    if v_clamped > 92:
+        s_max = 70
+
+    if 200 <= h <= 280 and v_clamped > 65:
+        s_max = min(s_max, 70)
+
+    if 0 <= h <= 40 and v_clamped < 35:
+        s_max = min(s_max, 80)
+
+    return {"h": h, "s": min(max(s, 0), s_max), "v": min(max(v_clamped, 0), 100)}
+
+
+def normalize_status(name: str, ip: str, response: dict[str, Any] | None, error: str | None = None) -> dict[str, Any]:
+    if error:
+        return {"name": name, "ip": ip, "ok": False, "error": error}
+    result = (response or {}).get("result") or {}
+    state = result.get("state")
+    scene_id = result.get("sceneId")
+    # Wiz bulbs commonly report sceneId: 0 after explicit RGB/white setPilot calls.
+    # Treat 0 as "not in a scene" so clients don't switch into Scene mode.
+    if not isinstance(scene_id, int) or scene_id <= 0:
+        scene_id = None
+    return {
+        "name": name,
+        "ip": ip,
+        "ok": True,
+        "state": "on" if state is True else "off" if state is False else "unknown",
+        "dimming": result.get("dimming"),
+        "r": result.get("r"),
+        "g": result.get("g"),
+        "b": result.get("b"),
+        "sceneId": scene_id,
+        "speed": result.get("speed") if scene_id is not None else None,
+        "temp": result.get("temp"),
+        "raw": response,
+    }
+
+
+def get_status(name: str) -> dict[str, Any]:
+    ip = light_ip(name)
+    try:
+        proc = run_helper(ip, "status")
+        return normalize_status(name, ip, json.loads(proc.stdout))
+    except Exception as exc:
+        return normalize_status(name, ip, None, str(exc))
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    if args.details:
+        entries = light_entries()
+        if args.json:
+            save_json(entries)
+        else:
+            for name, entry in sorted(entries.items()):
+                print(f"{name}\t{entry['ip']}\t{entry.get('icon', 'default')}")
+        return
+
+    mapping = lights()
+    if args.json:
+        save_json(mapping)
+    else:
+        for name, ip in sorted(mapping.items()):
+            print(f"{name}\t{ip}")
+
+
+def cmd_icons(args: argparse.Namespace) -> None:
+    if args.json:
+        save_json(LIGHT_ICONS)
+    else:
+        for icon in LIGHT_ICONS:
+            print(icon)
+
+
+def cmd_set_icon(args: argparse.Namespace) -> None:
+    icon = args.icon
+    if icon not in LIGHT_ICONS:
+        known = ", ".join(LIGHT_ICONS)
+        raise SystemExit(f"Unknown icon '{icon}'. Known icons: {known}")
+
+    data = config()
+    light_data = data.get("lights", {})
+    if args.name not in light_data:
+        known = ", ".join(sorted(light_data)) or "none"
+        raise SystemExit(f"Unknown light '{args.name}'. Known lights: {known}")
+
+    if icon == "default":
+        light_data[args.name].pop("icon", None)
+    else:
+        light_data[args.name]["icon"] = icon
+    data["lights"] = light_data
+    write_json_file(CONFIG_FILE, data)
+    save_json({"ok": True, "name": args.name, "icon": icon})
+
+
+def cmd_power(args: argparse.Namespace) -> None:
+    ip = light_ip(args.name)
+    run_helper(ip, args.command)
+    save_json({"ok": True, "name": args.name, "ip": ip, "state": "on" if args.command == "on" else "off"})
+
+
+def cmd_dim(args: argparse.Namespace) -> None:
+    ip = light_ip(args.name)
+    dimming = max(10, min(100, int(args.dimming)))
+    run_helper(ip, "dimming", "--dimming", str(dimming))
+    save_json({"ok": True, "name": args.name, "ip": ip, "dimming": dimming})
+
+
+def cmd_hsv(args: argparse.Namespace) -> None:
+    ip = light_ip(args.name)
+    hsv = perceptual_clamp_hsv(args.hue, args.saturation, args.value)
+    dimming = round(hsv["v"])
+
+    rgb = hsv_to_rgb(hsv["h"], hsv["s"], hsv["v"])
+    run_helper(
+        ip,
+        "rgb",
+        "--r", str(rgb["r"]),
+        "--g", str(rgb["g"]),
+        "--b", str(rgb["b"]),
+        "--dimming", str(dimming),
+    )
+    save_json({"ok": True, "name": args.name, "ip": ip, "hsv": hsv, "rgb": rgb, "dimming": dimming})
+
+
+def cmd_hsv_preview(args: argparse.Namespace) -> None:
+    hsv = perceptual_clamp_hsv(args.hue, args.saturation, args.value)
+    rgb = hsv_to_rgb(hsv["h"], hsv["s"], hsv["v"])
+    save_json({"ok": True, "hsv": hsv, "rgb": rgb, "dimming": round(hsv["v"])})
+
+
+def cmd_temp(args: argparse.Namespace) -> None:
+    ip = light_ip(args.name)
+    temp = max(2200, min(6500, int(args.temp)))
+    dimming = max(10, min(100, int(args.dimming)))
+    run_helper(ip, "temp", "--temp", str(temp), "--dimming", str(dimming))
+    save_json({"ok": True, "name": args.name, "ip": ip, "temp": temp, "dimming": dimming})
+
+
+def cmd_scene(args: argparse.Namespace) -> None:
+    ip = light_ip(args.name)
+    scene_id = int(args.scene_id)
+    dimming = max(10, min(100, int(args.dimming)))
+    extra = ["--scene-id", str(scene_id), "--dimming", str(dimming)]
+    response = {"ok": True, "name": args.name, "ip": ip, "sceneId": scene_id, "dimming": dimming}
+    if args.speed is not None:
+        speed = max(10, min(200, int(args.speed)))
+        extra += ["--speed", str(speed)]
+        response["speed"] = speed
+    run_helper(ip, "scene", *extra)
+    save_json(response)
+
+
+def cmd_preset(args: argparse.Namespace) -> None:
+    ip = light_ip(args.name)
+    preset = presets().get(args.preset)
+    if not preset:
+        known = ", ".join(sorted(presets())) or "none"
+        raise SystemExit(f"Unknown preset '{args.preset}'. Known presets: {known}")
+    dimming = max(10, min(100, int(preset.get("dimming", 100))))
+    if "temp" in preset:
+        temp = max(2200, min(6500, int(preset["temp"])))
+        run_helper(ip, "temp", "--temp", str(temp), "--dimming", str(dimming))
+        save_json({"ok": True, "name": args.name, "ip": ip, "preset": args.preset, "temp": temp, "dimming": dimming})
+        return
+    if "sceneId" in preset:
+        scene_id = int(preset["sceneId"])
+        # Scene presets should only switch the scene. Preserve the bulb's current
+        # brightness and dynamic scene speed instead of applying saved values.
+        run_helper(ip, "scene", "--scene-id", str(scene_id), "--preserve-dimming")
+        save_json({"ok": True, "name": args.name, "ip": ip, "preset": args.preset, "sceneId": scene_id})
+        return
+    r, g, b = int(preset["r"]), int(preset["g"]), int(preset["b"])
+    run_helper(ip, "rgb", "--r", str(r), "--g", str(g), "--b", str(b), "--dimming", str(dimming))
+    save_json({"ok": True, "name": args.name, "ip": ip, "preset": args.preset, "rgb": {"r": r, "g": g, "b": b}, "dimming": dimming})
+
+
+def cmd_presets(args: argparse.Namespace) -> None:
+    data = presets()
+    if args.json:
+        save_json(data)
+    else:
+        for name, preset in sorted(data.items()):
+            if "temp" in preset:
+                print(f"{name}\twhite {preset.get('temp')}K {preset.get('dimming', 100)}%")
+            elif "sceneId" in preset:
+                print(f"{name}\tscene {preset.get('sceneId')}")
+            else:
+                print(f"{name}\trgb {preset.get('r')},{preset.get('g')},{preset.get('b')} {preset.get('dimming', 100)}%")
+
+
+def cmd_save_preset(args: argparse.Namespace) -> None:
+    status = get_status(args.name)
+    if not status.get("ok"):
+        raise SystemExit(status.get("error") or f"Could not read status for {args.name}")
+    dimming = max(10, min(100, int(status.get("dimming") or 100)))
+    if isinstance(status.get("temp"), int):
+        preset = {"temp": max(2200, min(6500, int(status["temp"]))), "dimming": dimming}
+    elif all(isinstance(status.get(k), int) for k in ("r", "g", "b")):
+        preset = {"r": int(status["r"]), "g": int(status["g"]), "b": int(status["b"]), "dimming": dimming}
+    elif isinstance(status.get("sceneId"), int):
+        preset = {"sceneId": int(status["sceneId"])}
+    else:
+        raise SystemExit("Current state is not an RGB, white temperature, or scene state")
+    data = user_presets()
+    data[args.preset] = preset
+    write_json_file(PRESETS_FILE, data)
+    merged = {**default_presets(), **data}
+    save_json({"ok": True, "name": args.name, "preset": args.preset, "value": preset, "presets": merged})
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    if args.all:
+        mapping = lights()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, max(1, len(mapping)))) as executor:
+            futures = {executor.submit(get_status, name): name for name in mapping}
+            statuses = {futures[f]: f.result() for f in concurrent.futures.as_completed(futures)}
+        save_json(statuses)
+    else:
+        save_json(get_status(args.name))
+
+
+def cmd_discover(args: argparse.Namespace) -> None:
+    cmd = [str(PYTHON), str(DISCOVER)]
+    if args.subnet:
+        cmd += ["--subnet", args.subnet]
+    if args.dry_run:
+        cmd.append("--dry-run")
+    if args.interactive:
+        cmd.append("--interactive")
+        subprocess.run(cmd, cwd=ROOT, text=True, check=True)
+        save_json({"ok": True, "lights": lights()})
+    else:
+        proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, check=True)
+        save_json({"ok": True, "stdout": proc.stdout, "lights": lights()})
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Control local Wiz lights by logical name")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("list", help="List configured lights")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--details", action="store_true", help="Include IP, MAC, and widget icon metadata")
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("icons", help="List available light icons")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_icons)
+
+    p = sub.add_parser("set-icon", help="Set the widget icon for a configured light")
+    p.add_argument("name")
+    p.add_argument("icon")
+    p.set_defaults(func=cmd_set_icon)
+
+    for command in ("on", "off"):
+        p = sub.add_parser(command, help=f"Turn a light {command}")
+        p.add_argument("name")
+        p.set_defaults(func=cmd_power)
+
+    p = sub.add_parser("dim", help="Set brightness/dimming 10-100")
+    p.add_argument("name")
+    p.add_argument("dimming", type=int)
+    p.set_defaults(func=cmd_dim)
+
+    p = sub.add_parser("hsv", help="Set color via HSV using the perceptual clamp")
+    p.add_argument("name")
+    p.add_argument("hue", type=float)
+    p.add_argument("saturation", type=float)
+    p.add_argument("value", type=float)
+    p.set_defaults(func=cmd_hsv)
+
+    p = sub.add_parser("hsv-preview", help="Clamp HSV and convert to RGB without controlling a light")
+    p.add_argument("hue", type=float)
+    p.add_argument("saturation", type=float)
+    p.add_argument("value", type=float)
+    p.set_defaults(func=cmd_hsv_preview)
+
+    p = sub.add_parser("temp", help="Set white color temperature/dimming")
+    p.add_argument("name")
+    p.add_argument("temp", type=int)
+    p.add_argument("dimming", type=int, nargs="?", default=100)
+    p.set_defaults(func=cmd_temp)
+
+    p = sub.add_parser("scene", help="Set Wiz scene/dimming")
+    p.add_argument("name")
+    p.add_argument("scene_id", type=int)
+    p.add_argument("dimming", type=int, nargs="?", default=100)
+    p.add_argument("speed", type=int, nargs="?")
+    p.set_defaults(func=cmd_scene)
+
+    p = sub.add_parser("preset", help="Apply a color preset from presets.json")
+    p.add_argument("name")
+    p.add_argument("preset")
+    p.set_defaults(func=cmd_preset)
+
+    p = sub.add_parser("presets", help="List shipped defaults merged with user presets")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_presets)
+
+    p = sub.add_parser("save-preset", help="Save current light state as a preset")
+    p.add_argument("name")
+    p.add_argument("preset")
+    p.set_defaults(func=cmd_save_preset)
+
+    p = sub.add_parser("status", help="Read current status with getPilot")
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("name", nargs="?")
+    group.add_argument("--all", action="store_true")
+    p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("discover", help="Rediscover lights and update config.json")
+    p.add_argument("--subnet")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--interactive", action="store_true", help="Flash each discovered bulb and prompt for its friendly name")
+    p.set_defaults(func=cmd_discover)
+
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        args.func(args)
+    except subprocess.CalledProcessError as exc:
+        sys.stderr.write(exc.stderr or exc.stdout or str(exc))
+        raise SystemExit(exc.returncode)
+
+
+if __name__ == "__main__":
+    main()

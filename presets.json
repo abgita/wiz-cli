@@ -1,0 +1,71 @@
+{
+  "Cozy": {
+    "sceneId": 6
+  },
+  "Relax": {
+    "sceneId": 16
+  },
+  "Plant growth": {
+    "sceneId": 19
+  },
+  "Focus": {
+    "sceneId": 15
+  },
+  "TV time": {
+    "sceneId": 18
+  },
+  "Madang": {
+    "r": 13,
+    "g": 86,
+    "b": 0,
+    "dimming": 100
+  },
+  "Candlelight": {
+    "sceneId": 29
+  },
+  "Fireplace": {
+    "sceneId": 5
+  },
+  "Romance": {
+    "sceneId": 2
+  },
+  "Party": {
+    "sceneId": 4
+  },
+  "Pulse": {
+    "sceneId": 31
+  },
+  "Steampunk": {
+    "sceneId": 32
+  },
+  "Bedtime": {
+    "sceneId": 10
+  },
+  "Christmas": {
+    "sceneId": 27
+  },
+  "Diwali": {
+    "sceneId": 33
+  },
+  "Halloween": {
+    "sceneId": 28
+  },
+  "Wake-up": {
+    "sceneId": 9
+  },
+  "Cool white": {
+    "temp": 6500,
+    "dimming": 100
+  },
+  "Daylight": {
+    "temp": 4200,
+    "dimming": 100
+  },
+  "Night light": {
+    "sceneId": 14
+  },
+  "Warm white": {
+    "temp": 2700,
+    "dimming": 100
+  }
+}

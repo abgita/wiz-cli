@@ -58,7 +58,7 @@ wizctl discover --subnet 192.168.0.0/24
 wizctl discover --dry-run
 ```
 
-`wizctl hsv` applies a perceptual HSV clamp before converting to RGB for more usable bulb colors at high brightness and in blue/purple ranges. `wizctl hsv-preview` returns the same clamped HSV/RGB JSON without controlling a light, which is useful for UI previews.
+`wizctl hsv` sets color from HSV; value is brightness. `wizctl hsv-preview` shows the resulting RGB without changing a light.
 
 `wizctl presets` returns shipped defaults from `presets.json` merged with user presets from `~/.wiz-cli/presets.json`; user presets with the same name override defaults.
 

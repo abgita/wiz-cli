@@ -430,8 +430,6 @@ Item {
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 2
                         Layout.preferredHeight: Kirigami.Units.gridUnit
                         radius: height / 2
-                        border.width: 1
-                        border.color: Kirigami.Theme.disabledTextColor
                         color: root.colorPreview
                     }
                 }
@@ -931,7 +929,13 @@ Item {
             var obj = root.parseJson(stdout)
             var rgb = obj.rgb || ({})
             if (typeof rgb.r === "number" && typeof rgb.g === "number" && typeof rgb.b === "number") {
-                root.colorPreview = Qt.rgba(rgb.r / 255, rgb.g / 255, rgb.b / 255, 1)
+                var dim = typeof obj.dimming === "number" ? Math.max(0, Math.min(100, obj.dimming)) / 100 : 1
+                var gamma = 2.2
+                function dimChannel(c) {
+                    var linear = Math.pow(Math.max(0, Math.min(255, c)) / 255, gamma)
+                    return Math.pow(linear * dim, 1 / gamma)
+                }
+                root.colorPreview = Qt.rgba(dimChannel(rgb.r), dimChannel(rgb.g), dimChannel(rgb.b), 1)
             }
         }, { busy: false, quiet: true })
     }

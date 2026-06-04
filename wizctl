@@ -142,26 +142,26 @@ def hsv_to_rgb(h: float, s: float, v: float) -> dict[str, int]:
     }
 
 
-def perceptual_clamp_hsv(h: float, s: float, v: float) -> dict[str, float]:
-    """Ad-hoc HSV clamp for more realistic bulb colors."""
-    h = h % 360
-    v_clamped = max(v, 18)
+def normalize_wiz_hsv(h: float, s: float, v: float) -> dict[str, float]:
+    """Normalize HSV input for Wiz bulbs while preserving the full RGB gamut.
 
-    s_max = 100
-    if v_clamped > 75:
-        s_max = 90
-    if v_clamped > 85:
-        s_max = 80
-    if v_clamped > 92:
-        s_max = 70
+    Wiz exposes RGB intensity separately from ``dimming``. Keep hue and
+    saturation as requested, and treat value as bulb dimming only.
+    """
+    return {
+        "h": h % 360,
+        "s": min(max(s, 0), 100),
+        "v": min(max(v, 10), 100),
+    }
 
-    if 200 <= h <= 280 and v_clamped > 65:
-        s_max = min(s_max, 70)
 
-    if 0 <= h <= 40 and v_clamped < 35:
-        s_max = min(s_max, 80)
+def hsv_to_wiz_rgb(h: float, s: float) -> dict[str, int]:
+    """Convert hue/saturation to the RGB payload Wiz expects.
 
-    return {"h": h, "s": min(max(s, 0), s_max), "v": min(max(v_clamped, 0), 100)}
+    Brightness is sent as the separate dimming field, so RGB value stays at
+    100% to allow pure saturated colors at any dimming level.
+    """
+    return hsv_to_rgb(h, s, 100)
 
 
 def normalize_status(name: str, ip: str, response: dict[str, Any] | None, error: str | None = None) -> dict[str, Any]:
@@ -261,10 +261,10 @@ def cmd_dim(args: argparse.Namespace) -> None:
 
 def cmd_hsv(args: argparse.Namespace) -> None:
     ip = light_ip(args.name)
-    hsv = perceptual_clamp_hsv(args.hue, args.saturation, args.value)
+    hsv = normalize_wiz_hsv(args.hue, args.saturation, args.value)
     dimming = round(hsv["v"])
 
-    rgb = hsv_to_rgb(hsv["h"], hsv["s"], hsv["v"])
+    rgb = hsv_to_wiz_rgb(hsv["h"], hsv["s"])
     run_helper(
         ip,
         "rgb",
@@ -277,8 +277,8 @@ def cmd_hsv(args: argparse.Namespace) -> None:
 
 
 def cmd_hsv_preview(args: argparse.Namespace) -> None:
-    hsv = perceptual_clamp_hsv(args.hue, args.saturation, args.value)
-    rgb = hsv_to_rgb(hsv["h"], hsv["s"], hsv["v"])
+    hsv = normalize_wiz_hsv(args.hue, args.saturation, args.value)
+    rgb = hsv_to_wiz_rgb(hsv["h"], hsv["s"])
     save_json({"ok": True, "hsv": hsv, "rgb": rgb, "dimming": round(hsv["v"])})
 
 
@@ -416,14 +416,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("dimming", type=int)
     p.set_defaults(func=cmd_dim)
 
-    p = sub.add_parser("hsv", help="Set color via HSV using the perceptual clamp")
+    p = sub.add_parser("hsv", help="Set color via HSV; value controls dimming")
     p.add_argument("name")
     p.add_argument("hue", type=float)
     p.add_argument("saturation", type=float)
     p.add_argument("value", type=float)
     p.set_defaults(func=cmd_hsv)
 
-    p = sub.add_parser("hsv-preview", help="Clamp HSV and convert to RGB without controlling a light")
+    p = sub.add_parser("hsv-preview", help="Preview normalized HSV/RGB without controlling a light")
     p.add_argument("hue", type=float)
     p.add_argument("saturation", type=float)
     p.add_argument("value", type=float)

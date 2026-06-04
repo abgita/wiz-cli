@@ -29,7 +29,7 @@ Item {
     property var iconOptions: ["default", "icon_08", "icon_11", "icon_16", "icon_19"]
     property string selectedPresetName: "Custom"
     property string presetNameDraft: ""
-    property string selectedLight: ""
+    property string selectedLight: Plasmoid.configuration.lastSelectedLight || ""
     property string message: "Loading lights..."
     property bool busy: false
     property bool whiteMode: true
@@ -747,8 +747,8 @@ Item {
             var names = Object.keys(root.lightDetails).sort()
             for (var i = 0; i < names.length; i++) mapping[names[i]] = root.lightDetails[names[i]].ip
             root.lights = mapping
-            if (!root.selectedLight && names.length > 0) root.selectedLight = names[0]
-            if (root.selectedLight && !root.lights[root.selectedLight] && names.length > 0) root.selectedLight = names[0]
+            if (!root.selectedLight && names.length > 0) root.setSelectedLight(names[0])
+            if (root.selectedLight && !root.lights[root.selectedLight]) root.setSelectedLight(names.length > 0 ? names[0] : "")
             root.message = names.length ? "Loaded " + names.length + " lights" : "No lights configured"
             if (callback) callback()
         })
@@ -824,8 +824,13 @@ Item {
         })
     }
 
+    function setSelectedLight(name) {
+        root.selectedLight = name || ""
+        Plasmoid.configuration.lastSelectedLight = root.selectedLight
+    }
+
     function selectLight(name) {
-        root.selectedLight = name
+        root.setSelectedLight(name)
         root.message = "Selected " + name
         applySelectedStatusToSliders()
         refreshSelectedStatus()

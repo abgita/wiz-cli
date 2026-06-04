@@ -289,16 +289,9 @@ Item {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                height: 1
-                color: Kirigami.Theme.disabledTextColor
-                opacity: 0.3
-            }
-
-
             RowLayout {
                 Layout.fillWidth: true
+                Layout.topMargin: -fullRep.fieldSpacing
                 Controls.Label {
                     text: "Power"
                     Layout.fillWidth: true

@@ -64,28 +64,6 @@ wizctl discover --dry-run
 
 `wizctl presets` returns shipped defaults from `presets.json` merged with user presets from `~/.wiz-cli/presets.json`; user presets with the same name override defaults.
 
-## Pi skill
-
-This repo includes a Pi skill so a Pi agent can use `wizctl` to control your configured lights.
-
-Install it standalone from GitHub:
-
-```bash
-pi install git:github.com/abgita/wiz-cli
-```
-
-Or install it from a local checkout:
-
-```bash
-pi install .
-```
-
-For one-off use without installing, run Pi from the repo root with:
-
-```bash
-pi --skill ./SKILL.md
-```
-
 ## Plasma widget
 
 Install or upgrade the widget with:
@@ -119,4 +97,26 @@ For development reloads:
 
 ```bash
 ./reload-plasma-widget.sh
+```
+
+## Pi skill
+
+This repo includes a Pi skill so a Pi agent can use `wizctl` to control your configured lights.
+
+Install it standalone from GitHub:
+
+```bash
+pi install git:github.com/abgita/wiz-cli
+```
+
+Or install it from a local checkout:
+
+```bash
+pi install .
+```
+
+For one-off use without installing, run Pi from the repo root with:
+
+```bash
+pi --skill ./SKILL.md
 ```

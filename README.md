@@ -2,6 +2,8 @@
 
 Control local Philips Wiz bulbs from the `wizctl` CLI and a KDE Plasma widget.
 
+![Plasma widget preview](plasma-widget-preview.png)
+
 ## Features
 
 - Control Wiz bulbs directly over the LAN via UDP port `38899`.

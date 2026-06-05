@@ -4,7 +4,7 @@
     "Name": "Wiz Lights",
     "Description": "Control local Philips WiZ lights with wizctl",
     "Icon": "brightness-high",
-    "Version": "0.1.0",
+    "Version": "0.2.0",
     "Authors": [
       {
         "Name": "abgita"

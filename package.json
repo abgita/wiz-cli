@@ -1,0 +1,14 @@
+{
+  "name": "wiz-cli-pi-skill",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi skill for controlling Philips Wiz lights with wizctl.",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "skills": [
+      "./SKILL.md"
+    ]
+  }
+}

@@ -1,16 +1,17 @@
 ---
 name: wiz-lights
-description: Controls Philips Wiz lights through this repo's ./wizctl CLI. Use when the user asks to list lights, turn lights on/off, set brightness, HSV color, white temperature, scenes, presets, status, discovery, or widget icons.
+description: Controls Philips Wiz lights through the wizctl CLI bundled next to this skill. Use when the user asks to list lights, turn lights on/off, set brightness, HSV color, white temperature, scenes, presets, status, discovery, or widget icons.
 ---
 
 # Wiz Lights
 
-Operate local Philips Wiz lights using the repository's public CLI: `./wizctl`.
+Operate local Philips Wiz lights using the public CLI bundled with this skill: `wizctl`.
 
 ## Ground Rules
 
-- Run commands from the repository root unless already there.
-- Use `./wizctl` for user-visible behavior; do not bypass it for normal light control.
+- Resolve paths relative to this skill's directory. `wizctl`, `presets.json`, and the Python helper files are adjacent to `SKILL.md` when installed as a Pi package or used from the repository checkout.
+- Run commands from that directory with `./wizctl ...`, or use an absolute path to the adjacent `wizctl` file.
+- Use `wizctl` for user-visible behavior; do not bypass it for normal light control.
 - Light and preset names are exact CLI names. Query them before guessing if the user's wording is ambiguous.
 - Quote names that contain spaces, for example `"Bathroom 1"` or `"Cool white"`.
 - Only change lights/configuration when the user clearly asks.
@@ -69,7 +70,7 @@ Safety notes:
 ## Workflow
 
 1. Parse the user's requested target light(s), action, brightness, color/temperature/scene, preset, or configuration change.
-2. If needed, run `./wizctl list --json`, `./wizctl presets --json`, or `./wizctl icons --json` to resolve exact names.
+2. If needed, run `./wizctl list --json`, `./wizctl presets --json`, or `./wizctl icons --json` from the skill/package directory to resolve exact names.
 3. If multiple names match or no name matches, ask for clarification and show the available options.
 4. Execute the smallest appropriate `./wizctl` command.
 5. Summarize briefly: command run, resolved light/preset/icon, and CLI result or error.

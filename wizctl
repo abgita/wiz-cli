@@ -35,7 +35,7 @@ DEFAULT_PRESETS_FILE = ROOT / "presets.json"
 APP_HOME = Path.home() / ".wiz-cli"
 CONFIG_FILE = APP_HOME / "config.json"
 PRESETS_FILE = APP_HOME / "presets.json"
-LIGHT_ICONS = ["default", "icon_08", "icon_11", "icon_16", "icon_19"]
+LIGHT_ICONS = ["default", "bulb", "icon_08", "icon_11", "icon_16", "icon_19"]
 
 
 def load_json(path: Path, default: Any) -> Any:

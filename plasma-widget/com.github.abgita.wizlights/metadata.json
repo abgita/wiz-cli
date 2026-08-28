@@ -3,7 +3,7 @@
     "Id": "com.github.abgita.wizlights",
     "Name": "Wiz Lights",
     "Description": "Control local Philips WiZ lights with wizctl",
-    "Icon": "brightness-high",
+    "Icon": "bulb",
     "Version": "0.2.0",
     "Authors": [
       {

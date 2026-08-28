@@ -25,7 +25,7 @@ Item {
     property var presets: ({})
     property var presetNames: []
     property var presetOptions: ["Custom"]
-    property var iconOptions: ["default", "icon_08", "icon_11", "icon_16", "icon_19"]
+    property var iconOptions: ["default", "bulb", "icon_08", "icon_11", "icon_16", "icon_19"]
     property string selectedPresetName: "Custom"
     property string presetNameDraft: ""
     property string selectedLight: Plasmoid.configuration.lastSelectedLight || ""
@@ -55,7 +55,7 @@ Item {
         }
         PlasmaCore.IconItem {
             anchors.fill: parent
-            source: "brightness-high"
+            source: Qt.resolvedUrl("../icons/bulb.svg")
         }
     }
 

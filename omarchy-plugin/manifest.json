@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "com.github.abgita.wizlights",
+  "name": "Wiz Lights",
+  "version": "0.1.0",
+  "author": "abgita",
+  "description": "Control local Philips WiZ lights with wizctl",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Wiz Lights",
+    "description": "Control local Philips WiZ lights",
+    "category": "Utilities",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

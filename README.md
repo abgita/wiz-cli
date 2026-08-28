@@ -109,10 +109,9 @@ Install the development Omarchy/Quickshell plugin with:
 ./install.sh --omarchy
 ```
 
-This symlinks `omarchy-plugin/` into
-`~/.config/omarchy/plugins/com.github.abgita.wizlights/`, rescans plugins, and
-enables the Wiz Lights bar widget. Right-click its bar icon to refresh; left-click
-to open the controls.
+This creates `~/.config/omarchy/plugins/com.github.abgita.wizlights/`, symlinks
+the development plugin files into it, rescans plugins, and enables the Wiz Lights
+bar widget. Right-click its bar icon to refresh; left-click to open the controls.
 
 ## Pi skill
 

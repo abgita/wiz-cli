@@ -19,11 +19,17 @@ ln -sf "$ROOT/wizctl" "$WIZCTL_LINK"
 
 if [[ "$TARGET" == "--omarchy" ]]; then
   mkdir -p "$(dirname "$OMARCHY_PLUGIN_LINK")"
-  if [[ -e "$OMARCHY_PLUGIN_LINK" && ! -L "$OMARCHY_PLUGIN_LINK" ]]; then
-    echo "Error: $OMARCHY_PLUGIN_LINK exists and is not a symlink." >&2
+  # Plugin discovery expects a real directory and does not reliably traverse a
+  # symlink at the plugin root. Keep the directory real and link its source files.
+  if [[ -L "$OMARCHY_PLUGIN_LINK" ]]; then
+    rm "$OMARCHY_PLUGIN_LINK"
+  elif [[ -e "$OMARCHY_PLUGIN_LINK" && ! -d "$OMARCHY_PLUGIN_LINK" ]]; then
+    echo "Error: $OMARCHY_PLUGIN_LINK exists and is not a directory." >&2
     exit 1
   fi
-  ln -sfn "$OMARCHY_PLUGIN_DIR" "$OMARCHY_PLUGIN_LINK"
+  mkdir -p "$OMARCHY_PLUGIN_LINK"
+  ln -sfn "$OMARCHY_PLUGIN_DIR/manifest.json" "$OMARCHY_PLUGIN_LINK/manifest.json"
+  ln -sfn "$OMARCHY_PLUGIN_DIR/Panel.qml" "$OMARCHY_PLUGIN_LINK/Panel.qml"
 
   if ! command -v omarchy-shell >/dev/null 2>&1 || ! command -v omarchy >/dev/null 2>&1; then
     echo "Error: omarchy-shell and omarchy are required to enable the plugin." >&2

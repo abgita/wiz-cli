@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Io
 import qs.Ui
 import qs.Commons
@@ -10,6 +11,7 @@ Panel {
   moduleName: "com.github.abgita.wizlights"
   ipcTarget: "com.github.abgita.wizlights"
 
+  property string wizctlPath: Quickshell.env("HOME") + "/.local/bin/wizctl"
   property var lights: []
   property var statuses: ({})
   property var presets: ({})
@@ -44,7 +46,7 @@ Panel {
     commandQueue = commandQueue.slice()
     processOutput = ""
     processError = ""
-    commandProcess.command = ["wizctl"].concat(activeRequest.args.map(function(v) { return String(v) }))
+    commandProcess.command = [root.wizctlPath].concat(activeRequest.args.map(function(v) { return String(v) }))
     busy = true
     commandProcess.running = true
   }

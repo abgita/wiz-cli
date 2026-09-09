@@ -29,7 +29,7 @@ if [[ "$TARGET" == "--omarchy" ]]; then
   fi
   mkdir -p "$OMARCHY_PLUGIN_LINK"
   cp -f "$OMARCHY_PLUGIN_DIR/manifest.json" "$OMARCHY_PLUGIN_LINK/manifest.json"
-  cp -f "$OMARCHY_PLUGIN_DIR/Panel.qml" "$OMARCHY_PLUGIN_LINK/Panel.qml"
+  cp -f "$OMARCHY_PLUGIN_DIR/"*.qml "$OMARCHY_PLUGIN_LINK/"
 
   if ! command -v omarchy-shell >/dev/null 2>&1 || ! command -v omarchy >/dev/null 2>&1; then
     echo "Error: omarchy-shell and omarchy are required to enable the plugin." >&2
@@ -42,7 +42,7 @@ if [[ "$TARGET" == "--omarchy" ]]; then
 
 Installed Wiz Lights for Omarchy.
 
-The development plugin is linked from:
+The development plugin is installed at:
   $OMARCHY_PLUGIN_LINK
 
 Configure lights if needed:

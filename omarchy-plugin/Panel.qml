@@ -1,6 +1,5 @@
 import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
+import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
 import qs.Ui
@@ -13,10 +12,13 @@ Panel {
 
   property string wizctlPath: Quickshell.env("HOME") + "/.local/bin/wizctl"
   property var lights: []
+  property var lightDetails: ({})
   property var statuses: ({})
   property var presets: ({})
   property var presetNames: []
   property string selectedLight: ""
+  property string selectedPreset: "Custom"
+  property bool sceneMode: false
   property bool busy: false
   property string message: "Loading lights…"
   property bool whiteMode: true
@@ -24,6 +26,8 @@ Panel {
   property int saturation: 70
   property int temperature: 2700
   property int dimming: 80
+  // Invalidate status reads when the user edits controls or changes selection.
+  property int controlRevision: 0
   property var commandQueue: []
   property var activeRequest: null
   property string processOutput: ""
@@ -31,106 +35,208 @@ Panel {
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
-
-  onOpenedChanged: if (opened) refreshEverything()
-
-  function enqueue(args, callback) {
-    commandQueue.push({ args: args, callback: callback })
-    commandQueue = commandQueue.slice()
-    startNextCommand()
+  onOpenedChanged: if (opened)
+    refreshEverything()
+  onSelectedLightChanged: {
+    controlRevision++
+    modeDebounce.stop()
+    brightnessDebounce.stop()
+    selectedPreset = "Custom"
+    sceneMode = false
   }
 
+  function enqueue(args, callback) {
+    commandQueue.push({
+      args: args,
+      callback: callback
+    })
+    startNextCommand()
+  }
   function startNextCommand() {
-    if (commandProcess.running || activeRequest || commandQueue.length === 0) return
+    if (commandProcess.running || activeRequest || !commandQueue.length)
+      return
     activeRequest = commandQueue.shift()
-    commandQueue = commandQueue.slice()
     processOutput = ""
     processError = ""
-    commandProcess.command = [root.wizctlPath].concat(activeRequest.args.map(function(v) { return String(v) }))
+    commandProcess.command = [wizctlPath].concat(activeRequest.args.map(function (v) {
+      return String(v)
+    }))
     busy = true
     commandProcess.running = true
   }
-
   function finishCommand(exitCode) {
     var request = activeRequest
     activeRequest = null
     busy = commandQueue.length > 0
     if (exitCode === 0) {
       if (request && request.callback) {
-        try { request.callback(JSON.parse(processOutput.trim() || "{}")) }
-        catch (e) { message = "Invalid wizctl response" }
+        var response
+        try {
+          response = JSON.parse(processOutput.trim() || "{}")
+        } catch (e) {
+          message = "Invalid wizctl response: " + e
+          startNextCommand()
+          return
+        }
+        try {
+          request.callback(response)
+        } catch (e) {
+          message = "Could not update controls: " + e
+          console.warn(message)
+        }
       }
-    } else {
-      message = (processError.trim() || processOutput.trim() || "wizctl command failed")
-    }
+    } else
+      message = processError.trim() || processOutput.trim() || "wizctl command failed"
     startNextCommand()
   }
-
   function refreshEverything() {
-    enqueue(["list", "--json", "--details"], function(obj) {
+    var revision = controlRevision
+    enqueue(["list", "--json", "--details"], function (obj) {
+      lightDetails = obj
       lights = Object.keys(obj).sort()
-      if (!selectedLight || lights.indexOf(selectedLight) < 0)
+      if (lights.indexOf(selectedLight) < 0) {
         selectedLight = lights.length ? lights[0] : ""
-      message = lights.length ? "Loaded " + lights.length + " lights" : "No lights configured"
+        revision = controlRevision
+      }
     })
-    enqueue(["presets", "--json"], function(obj) {
+    enqueue(["presets", "--json"], function (obj) {
       presets = obj
       presetNames = Object.keys(obj).sort()
     })
-    enqueue(["status", "--all"], function(obj) {
+    enqueue(["status", "--all"], function (obj) {
       statuses = obj
-      applySelectedStatus()
+      if (revision === controlRevision)
+        applySelectedStatus()
       message = "Status refreshed"
     })
   }
-
   function refreshSelected() {
-    if (!selectedLight) return
-    enqueue(["status", selectedLight], function(obj) {
-      statuses[selectedLight] = obj
+    var name = selectedLight
+    var revision = controlRevision
+    if (!name)
+      return
+    enqueue(["status", name], function (obj) {
+      statuses[name] = obj
       statuses = Object.assign({}, statuses)
-      applySelectedStatus()
+      if (selectedLight === name && revision === controlRevision)
+        applySelectedStatus()
     })
   }
-
+  function matchingPreset(st) {
+    for (var i = 0; i < presetNames.length; i++) {
+      var p = presets[presetNames[i]]
+      if (st.sceneId > 0 && st.sceneId === p.sceneId)
+        return presetNames[i]
+      if (st.dimming !== p.dimming)
+        continue
+      if (typeof st.temp === "number" && st.temp === p.temp)
+        return presetNames[i]
+      if (typeof st.r === "number" && st.r === p.r && st.g === p.g && st.b === p.b)
+        return presetNames[i]
+    }
+    return "Custom"
+  }
   function applySelectedStatus() {
     var st = statuses[selectedLight]
-    if (!st || st.ok === false) return
-    if (typeof st.dimming === "number") dimming = Math.max(10, Math.min(100, st.dimming))
+    if (!st || st.ok === false)
+      return
+    if (typeof st.dimming === "number")
+      dimming = Math.max(10, Math.min(100, st.dimming))
+    sceneMode = typeof st.sceneId === "number" && st.sceneId > 0
     if (typeof st.temp === "number") {
       whiteMode = true
+      sceneMode = false
       temperature = Math.max(2200, Math.min(6500, st.temp))
-    } else if (typeof st.r === "number" || typeof st.sceneId === "number") {
+    } else if (!sceneMode && typeof st.r === "number") {
       whiteMode = false
+      var r = st.r / 255, g = st.g / 255, b = st.b / 255
+      var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
+      saturation = max ? Math.round(d / max * 100) : 0
+      if (d) {
+        var h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+        hue = Math.round((h * 60 + 360) % 360)
+      }
     }
+    selectedPreset = matchingPreset(st)
   }
-
+  function lightIcon(name) {
+    var icon = (lightDetails[name] || {}).icon
+    return ({
+        icon_08: "󰛨",
+        icon_11: "󰏔",
+        icon_16: "󰛀",
+        icon_19: "󱐋"
+      })[icon] || "󰌵"
+  }
   function runLight(args, successMessage) {
-    if (!selectedLight) return
-    enqueue(args, function() {
+    if (!selectedLight)
+      return
+    var name = selectedLight
+    var revision = controlRevision
+    enqueue(args, function () {
       message = successMessage
-      refreshSelected()
+      if (selectedLight === name && revision === controlRevision)
+        refreshSelected()
     })
   }
-
   function setPower(on) {
     runLight([on ? "on" : "off", selectedLight], (on ? "Turned on " : "Turned off ") + selectedLight)
   }
-
   function applyMode() {
+    controlRevision++
+    modeDebounce.stop()
+    sceneMode = false
+    selectedPreset = "Custom"
     if (whiteMode)
       runLight(["temp", selectedLight, temperature, dimming], "White set to " + temperature + "K")
     else
       runLight(["hsv", selectedLight, hue, saturation, dimming], "Color updated")
   }
-
+  function scheduleMode() {
+    controlRevision++
+    selectedPreset = "Custom"
+    modeDebounce.restart()
+  }
+  function scheduleBrightness() {
+    controlRevision++
+    brightnessDebounce.restart()
+  }
   function applyBrightness() {
     runLight(["dim", selectedLight, dimming], "Brightness set to " + dimming + "%")
   }
-
   function applyPreset(name) {
-    if (!name) return
+    if (!name)
+      return
+    controlRevision++
+    modeDebounce.stop()
+    brightnessDebounce.stop()
     runLight(["preset", selectedLight, name], "Applied preset " + name)
+  }
+  function rediscover() {
+    enqueue(["discover"], function () {
+      message = "Discovery finished"
+      refreshEverything()
+    })
+  }
+  function savePreset(name) {
+    if (!selectedLight || !name.trim())
+      return
+    // Commit pending slider edits before asking the bulb for the saved state.
+    if (modeDebounce.running)
+      applyMode()
+    if (brightnessDebounce.running) {
+      brightnessDebounce.stop()
+      applyBrightness()
+    }
+    var light = selectedLight
+    var revision = controlRevision
+    enqueue(["save-preset", light, name], function (obj) {
+      presets = obj.presets
+      presetNames = Object.keys(presets).sort()
+      if (selectedLight === light && revision === controlRevision)
+        selectedPreset = name
+      message = "Saved preset " + name
+    })
   }
 
   Process {
@@ -143,162 +249,60 @@ Panel {
       waitForEnd: true
       onStreamFinished: root.processError = text
     }
-    onExited: function(exitCode) { root.finishCommand(exitCode) }
+    onExited: function (exitCode) {
+      root.finishCommand(exitCode)
+    }
   }
-
   Timer {
     interval: 30000
     running: true
     repeat: true
-    triggeredOnStart: true
-    onTriggered: if (!root.opened && !root.busy) root.enqueue(["status", "--all"], function(obj) { root.statuses = obj })
+    onTriggered: if (!root.busy)
+      root.enqueue(["status", "--all"], function (obj) {
+        root.statuses = obj
+      })
   }
-
   Timer {
     id: brightnessDebounce
     interval: 250
     onTriggered: root.applyBrightness()
   }
-
   Timer {
     id: modeDebounce
     interval: 250
     onTriggered: root.applyMode()
   }
-
   BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
     text: "󰌵"
-    opacity: root.lights.length === 0 ? 0.55 : 1
-    onPressed: function(b) {
-      if (b === Qt.RightButton) root.refreshEverything()
-      else root.toggle()
+    onPressed: function (b) {
+      if (b === Qt.RightButton)
+        root.refreshEverything()
+      else
+        root.toggle()
     }
   }
-
   KeyboardPanel {
     id: popup
     anchorItem: button
     owner: root
     bar: root.bar
     open: root.opened
-    contentWidth: popup.fittedContentWidth(Style.space(390))
-    contentHeight: popup.fittedContentHeight(content.implicitHeight, Style.space(620))
-
-    ScrollView {
+    contentWidth: popup.fittedContentWidth(360)
+    contentHeight: popup.fittedContentHeight(content.implicitHeight, 720)
+    Flickable {
       anchors.fill: parent
       clip: true
-      ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-      ColumnLayout {
+      contentWidth: width
+      contentHeight: content.implicitHeight
+      boundsBehavior: Flickable.StopAtBounds
+      Controls.ScrollBar.vertical: Controls.ScrollBar {}
+      WizControls {
         id: content
         width: parent.width
-        spacing: Style.space(12)
-
-        RowLayout {
-          Layout.fillWidth: true
-          Text {
-            Layout.fillWidth: true
-            text: "Wiz Lights"
-            color: root.bar.foreground
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.title
-            font.bold: true
-          }
-          Button { text: "↻"; enabled: !root.busy; onClicked: root.refreshEverything() }
-        }
-
-        PanelSeparator { Layout.fillWidth: true; foreground: root.bar.foreground }
-
-        ComboBox {
-          Layout.fillWidth: true
-          model: root.lights
-          currentIndex: Math.max(0, root.lights.indexOf(root.selectedLight))
-          enabled: root.lights.length > 0
-          onActivated: {
-            root.selectedLight = currentText
-            root.applySelectedStatus()
-            root.refreshSelected()
-          }
-        }
-
-        RowLayout {
-          Layout.fillWidth: true
-          Text {
-            Layout.fillWidth: true
-            text: {
-              var st = root.statuses[root.selectedLight]
-              return !st ? "Unknown" : st.ok === false ? "Unreachable" : (st.state || "Unknown")
-            }
-            color: root.bar.foreground
-            font.family: root.bar.fontFamily
-          }
-          Switch {
-            checked: {
-              var st = root.statuses[root.selectedLight]
-              return !!st && st.state === "on"
-            }
-            enabled: !!root.selectedLight && !root.busy
-            onClicked: root.setPower(checked)
-          }
-        }
-
-        PanelSeparator { Layout.fillWidth: true; foreground: root.bar.foreground }
-
-        Text { text: "PRESET"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.bold: true }
-        ComboBox {
-          Layout.fillWidth: true
-          model: root.presetNames
-          enabled: !!root.selectedLight && root.presetNames.length > 0
-          onActivated: root.applyPreset(currentText)
-        }
-
-        RowLayout {
-          Layout.fillWidth: true
-          Button { text: "RGB"; checkable: true; checked: !root.whiteMode; onClicked: { root.whiteMode = false; root.applyMode() } }
-          Button { text: "White"; checkable: true; checked: root.whiteMode; onClicked: { root.whiteMode = true; root.applyMode() } }
-        }
-
-        ColumnLayout {
-          Layout.fillWidth: true
-          visible: root.whiteMode
-          Text { text: "Temperature  " + root.temperature + "K"; color: root.bar.foreground; font.family: root.bar.fontFamily }
-          Slider {
-            Layout.fillWidth: true; from: 2200; to: 6500; stepSize: 50; value: root.temperature
-            onMoved: { root.temperature = Math.round(value / 50) * 50; modeDebounce.restart() }
-          }
-        }
-
-        ColumnLayout {
-          Layout.fillWidth: true
-          visible: !root.whiteMode
-          Text { text: "Hue  " + root.hue + "°"; color: root.bar.foreground; font.family: root.bar.fontFamily }
-          Slider {
-            Layout.fillWidth: true; from: 0; to: 360; stepSize: 1; value: root.hue
-            onMoved: { root.hue = Math.round(value); modeDebounce.restart() }
-          }
-          Text { text: "Saturation  " + root.saturation + "%"; color: root.bar.foreground; font.family: root.bar.fontFamily }
-          Slider {
-            Layout.fillWidth: true; from: 0; to: 100; stepSize: 1; value: root.saturation
-            onMoved: { root.saturation = Math.round(value); modeDebounce.restart() }
-          }
-        }
-
-        Text { text: "Brightness  " + root.dimming + "%"; color: root.bar.foreground; font.family: root.bar.fontFamily }
-        Slider {
-          Layout.fillWidth: true; from: 10; to: 100; stepSize: 1; value: root.dimming
-          onMoved: { root.dimming = Math.round(value); brightnessDebounce.restart() }
-        }
-
-        Text {
-          Layout.fillWidth: true
-          text: root.busy ? "Working…" : root.message
-          color: Qt.darker(root.bar.foreground, 1.35)
-          font.family: root.bar.fontFamily
-          elide: Text.ElideRight
-        }
+        controller: root
       }
     }
   }

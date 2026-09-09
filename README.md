@@ -64,13 +64,15 @@ wizctl discover --dry-run
 
 `wizctl presets` returns shipped defaults from `presets.json` merged with user presets from `~/.wiz-cli/presets.json`; user presets with the same name override defaults.
 
-## Plasma widget
+## Desktop widgets
 
-Install or upgrade the widget with:
+### Plasma
 
+Install or upgrade the Plasma widget with:
 
 ```bash
 ./install.sh
+# equivalent to: ./install.sh --plasma
 ```
 
 The installer:
@@ -98,6 +100,22 @@ For development reloads:
 ```bash
 ./reload-plasma-widget.sh
 ```
+
+### Omarchy
+
+Install the development Omarchy/Quickshell plugin with:
+
+```bash
+./install.sh --omarchy
+```
+
+This copies the development plugin into
+`~/.config/omarchy/plugins/com.github.abgita.wizlights/`, rescans plugins, and
+enables the Wiz Lights bar widget. Re-run the installer after changing plugin
+source files. Right-click its bar icon to refresh; left-click to open the controls.
+Drag the handle below the light tiles to resize their scrollable section;
+double-click it to fit the contents. Use the preset menu to select scenes or
+saved colors, and the name field plus **Save** to save the selected light's state.
 
 ## Pi skill
 
